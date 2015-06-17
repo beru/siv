@@ -13,10 +13,36 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="ImageZero">
+      <UniqueIdentifier>{4bcfe871-3c82-4e09-8eea-1afac546799a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\winutil.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ImageZero\file.cpp">
+      <Filter>ImageZero</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ImageZero\portableimage.cpp">
+      <Filter>ImageZero</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\winutil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ImageZero\file.h">
+      <Filter>ImageZero</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ImageZero\image.h">
+      <Filter>ImageZero</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ImageZero\portableimage.h">
+      <Filter>ImageZero</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

@@ -1,16 +1,53 @@
 #include <stdio.h>
 
 #define STRICT
+#define NOMINMAX
+
 #include <windows.h>
 #include <windowsx.h>
 #include <ole2.h>
 #include <commctrl.h>
 #include <shlwapi.h>
 
+#include <memory>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <tchar.h>
+
 #pragma comment(lib, "comctl32.lib")
+#include <shlwapi.h>
+#pragma comment(lib, "shlwapi.lib") 
+
+#include "WairCursor.h"
+#include "winutil.h"
+
+#include "ImageZero/portableimage.h"
+#include "ImageZero/file.h"
 
 HINSTANCE g_hinst;                          /* This application's HINSTANCE */
-HWND g_hwndChild;                           /* Optional child window */
+
+HBITMAP g_hBMP;
+std::vector<uint8_t> g_bmiBuff(sizeof(BITMAPINFO) + sizeof(RGBQUAD) * 256);
+//BITMAPINFO g_bmi;
+void* g_pBits;
+HDC g_hMemDC;
+
+std::wstring g_dir;
+std::vector<std::wstring> g_filenames;
+
+struct CacheEntry
+{
+	std::wstring filename;
+    PortableImage pi;
+    std::shared_ptr<InputFile> infile;
+};
+std::vector<CacheEntry> g_caches;
+
+int g_indexToDisplay;
+
+#define WINDOW_CLASS_NAME "siv"
+#define APP_NAME "Sequential Images Viewer"
 
 /*
  *  OnSize
@@ -19,9 +56,6 @@ HWND g_hwndChild;                           /* Optional child window */
 void
 OnSize(HWND hwnd, UINT state, int cx, int cy)
 {
-    if (g_hwndChild) {
-        MoveWindow(g_hwndChild, 0, 0, cx, cy, TRUE);
-    }
 }
 
 /*
@@ -32,6 +66,22 @@ OnSize(HWND hwnd, UINT state, int cx, int cy)
 BOOL
 OnCreate(HWND hwnd, LPCREATESTRUCT lpcs)
 {
+	DragAcceptFiles(hwnd, TRUE);
+
+	BITMAPINFO* pBMI = (BITMAPINFO*) &g_bmiBuff[0];
+	BITMAPINFO& bmi = *pBMI;
+	
+	int width = 1920;
+	int height = 1080;
+	int bitsPerPixel = 32;
+
+	g_hBMP = CreateDIB(width, -height, bitsPerPixel, bmi, g_pBits);
+	HDC hWndDC = ::GetDC(hwnd);
+	g_hMemDC = ::CreateCompatibleDC(hWndDC);
+	::SetMapMode(g_hMemDC, ::GetMapMode(hWndDC));
+	::ReleaseDC(hwnd, hWndDC);
+	::SelectObject(g_hMemDC, g_hBMP);
+
     return TRUE;
 }
 
@@ -43,6 +93,9 @@ OnCreate(HWND hwnd, LPCREATESTRUCT lpcs)
 void
 OnDestroy(HWND hwnd)
 {
+	::DeleteDC(g_hMemDC);
+	::DeleteObject(g_hBMP);
+
     PostQuitMessage(0);
 }
 
@@ -53,6 +106,18 @@ OnDestroy(HWND hwnd)
 void
 PaintContent(HWND hwnd, PAINTSTRUCT *pps)
 {
+	RECT rec = pps->rcPaint;
+	::BitBlt(
+		pps->hdc,
+		rec.left,
+		rec.top,
+		rec.right - rec.left,
+		rec.bottom - rec.top,
+		g_hMemDC,
+		rec.left,
+		rec.top,
+		SRCCOPY);
+
 }
 
 /*
@@ -101,11 +166,167 @@ HWND CreateFullscreenWindow(HWND hwnd)
 		);
 }
 
+static
+bool loadImage(const TCHAR* path)
+{
+	auto& cache = g_caches[g_indexToDisplay];
+    cache.infile = std::shared_ptr<InputFile>(new InputFile(path));
+	auto& infile = *cache.infile;
+	auto& pi = cache.pi;
+    if (!infile.isReadable()) {
+        fprintf(stderr, "Cannot open input file");
+        return false;
+    }
+    if (!pi.readHeader(infile.data())) {
+        fprintf(stderr, "Cannot handle input file, only 24 bit PPM files supported.\n");
+        return false;
+    }
+    if (pi.components() != 3) {
+        fprintf(stderr, "Cannot handle 8-bit (grayscale) PGM files, only 24 bit PPM files supported.\n");
+        return false;
+    }
+    if (pi.width() > 16384 || pi.height() > 16384) {
+        fprintf(stderr, "Cannot handle image size %d x %d, limit is 16384 x 16384.\n", pi.width(), pi.height());
+        return false;
+    }
+
+	cache.filename = path;
+
+    return true;
+}
+
+void display(HWND hWnd)
+{
+	if (!g_filenames.size() || g_indexToDisplay >= g_filenames.size()) {
+		return;
+	}
+	if (g_caches.size() != g_filenames.size()) {
+		g_caches.resize(g_filenames.size());
+	}
+
+	std::vector<TCHAR> filename(1024);
+	TCHAR* pf = &filename[0];
+	pf[0] = 0;
+	PathAppend(pf, g_dir.c_str());
+	PathAppend(pf, g_filenames[g_indexToDisplay].c_str());
+	if (!PathFileExists(pf)) {
+		return;
+	}
+
+	CacheEntry& cache = g_caches[g_indexToDisplay];
+	if (cache.filename != pf) {
+		if (!loadImage(pf)) {
+			return;
+		}
+	}
+
+	auto& pi = cache.pi;
+
+	TCHAR title[256];
+	_stprintf_s(title, _T("%s - (%u/%u) %s"), TEXT(APP_NAME), g_indexToDisplay + 1, g_filenames.size(), pf);
+	::SetWindowText(hWnd, title);
+
+	BITMAPINFO* pBMI = (BITMAPINFO*) &g_bmiBuff[0];
+	const BITMAPINFOHEADER& hdr = pBMI->bmiHeader;
+	if (pi.width() > hdr.biWidth && pi.height() > hdr.biHeight) {
+        fprintf(stderr,
+				"Image %d x %d is bigger than internal bitmap %d x %d.\n",
+				pi.width(), pi.height(), hdr.biWidth, hdr.biHeight);
+        return;
+	}
+
+	const unsigned char* src = pi.data();
+	unsigned char* dst = (unsigned char*) g_pBits;
+	for (int y=0; y<pi.height(); ++y) {
+		for (int x=0; x<pi.width(); ++x) {
+			dst[x*4+0] = src[x*3+2];
+			dst[x*4+1] = src[x*3+1];
+			dst[x*4+2] = src[x*3+0];
+		}
+		dst += hdr.biWidth * 4;
+		src += pi.width() * 3;
+	}
+
+	RECT rec;
+	::GetClientRect(hWnd, &rec);
+	::InvalidateRect(hWnd, &rec, TRUE);
+}
+
 void OnChar(HWND hwnd, TCHAR ch, int cRepeat)
 {
-	if (ch == TEXT(' ')) {
+	switch (ch) {
+	case ' ':
 		CreateFullscreenWindow(hwnd);
+		break;
 	}
+}
+
+void OnKeyDown(HWND hwnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
+{
+	if (!g_filenames.size()) {
+		return;
+	}
+
+	switch (vk) {
+	case VK_RIGHT:
+		g_indexToDisplay = std::min(g_indexToDisplay + 1, (int)g_filenames.size() - 1);
+		display(hwnd);
+		break;
+	case VK_LEFT:
+		g_indexToDisplay = std::max(g_indexToDisplay - 1, 0);
+		display(hwnd);
+		break;
+	case VK_HOME:
+		g_indexToDisplay = 0;
+		display(hwnd);
+		break;
+	case VK_END:
+		g_indexToDisplay = (int)g_filenames.size() - 1;
+		display(hwnd);
+		break;
+	}
+}
+
+bool findFiles(const wchar_t* dir, std::vector<std::wstring>& filenames)
+{
+	WIN32_FIND_DATA ffd;
+	FINDEX_INFO_LEVELS level = FindExInfoBasic; // FindExInfoStandard;
+	HANDLE handle = FindFirstFileEx(dir,
+									level,
+									&ffd,
+									FindExSearchNameMatch,
+									NULL,
+									FIND_FIRST_EX_LARGE_FETCH);
+	if (handle == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+	BOOL ret;
+	do {
+		filenames.emplace_back(ffd.cFileName);
+		ret = FindNextFile(handle, &ffd);
+	} while (ret);
+
+	return ret == ERROR_NO_MORE_FILES || ret == ERROR_SUCCESS;
+}
+
+void OnDropFiles(HWND hWnd, HDROP hDrop)
+{
+	UINT nchars = DragQueryFile(hDrop, 0, NULL, 0);
+	std::unique_ptr<TCHAR[]> buff(new TCHAR[nchars * 2 + 1]);	// UTF-16
+	nchars = DragQueryFile(hDrop, 0, buff.get(), nchars + 1);
+	if (PathIsDirectory(buff.get())) {
+		wchar_t* dir = buff.get();
+		g_dir = dir;
+		PathAppend(dir, TEXT("\\*.ppm"));
+		g_filenames.clear();
+		WaitCursor waiter;
+		if (findFiles(dir, g_filenames)) {
+			std::sort(g_filenames.begin(), g_filenames.end());
+			g_indexToDisplay = 0;
+			display(hWnd);
+		}
+	}
+	DragFinish(hDrop);
 }
 
 /*
@@ -121,7 +342,10 @@ WndProc(HWND hwnd, UINT uiMsg, WPARAM wParam, LPARAM lParam)
     HANDLE_MSG(hwnd, WM_DESTROY, OnDestroy);
     HANDLE_MSG(hwnd, WM_PAINT, OnPaint);
     HANDLE_MSG(hwnd, WM_CHAR, OnChar);
+    HANDLE_MSG(hwnd, WM_KEYDOWN, OnKeyDown);
+	HANDLE_MSG(hwnd, WM_DROPFILES, OnDropFiles);
     case WM_PRINTCLIENT: OnPrintClient(hwnd, (HDC)wParam); return 0;
+	case WM_ERASEBKGND: return TRUE;
     }
 
     return DefWindowProc(hwnd, uiMsg, wParam, lParam);
@@ -139,9 +363,9 @@ InitApp(void)
     wc.hInstance = g_hinst;
     wc.hIcon = NULL;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hbrBackground = 0; //(HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszMenuName = NULL;
-    wc.lpszClassName = TEXT("Scratch");
+    wc.lpszClassName = TEXT(WINDOW_CLASS_NAME);
 
     if (!RegisterClass(&wc)) return FALSE;
 
@@ -163,8 +387,8 @@ int WINAPI WinMain(HINSTANCE hinst, HINSTANCE hinstPrev,
     if (SUCCEEDED(CoInitialize(NULL))) {/* In case we use COM */
 
         hwnd = CreateWindow(
-            TEXT("Scratch"),                /* Class Name */
-            TEXT("Scratch"),                /* Title */
+            TEXT(WINDOW_CLASS_NAME),		/* Class Name */
+            TEXT(APP_NAME),                /* Title */
             WS_OVERLAPPEDWINDOW,            /* Style */
             CW_USEDEFAULT, CW_USEDEFAULT,   /* Position */
             CW_USEDEFAULT, CW_USEDEFAULT,   /* Size */
