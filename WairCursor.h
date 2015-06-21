@@ -1,6 +1,8 @@
 #pragma once
 
-class WaitCursor
+#include "noncopyable.h"
+
+class WaitCursor : private noncopyable
 {
 public:
 	WaitCursor(LPCTSTR lpstrCursor = IDC_WAIT)

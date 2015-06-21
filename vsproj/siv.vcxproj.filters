@@ -24,6 +24,9 @@
     <ClCompile Include="..\image.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\thread.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\winutil.h">
@@ -33,6 +36,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\image.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\thread.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\CriticalSection.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

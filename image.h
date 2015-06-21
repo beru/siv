@@ -1,8 +1,9 @@
 #pragma once
 
 #include <stdio.h>
+#include "noncopyable.h"
 
-struct Image
+struct Image : private noncopyable
 {
 	Image();
 	virtual ~Image();
