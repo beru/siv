@@ -179,6 +179,32 @@ bool loadImage(const TCHAR* path)
     return true;
 }
 
+void drawImage(unsigned char* dst,
+			   const BITMAPINFOHEADER& hdr,
+			   const Image& image
+			  )
+{
+	if (image.width > hdr.biWidth && image.height > hdr.biHeight) {
+        fprintf(stderr,
+				"Image %d x %d is bigger than internal bitmap %d x %d.\n",
+				image.width, image.height, hdr.biWidth, hdr.biHeight);
+        return;
+	}
+
+	const unsigned char* src = image.data;
+	int ncomponents = image.ncomponents;
+	for (int y=0; y<image.height; ++y) {
+		for (int x=0; x<image.width; ++x) {
+			dst[x*4+0] = src[x*ncomponents+2];
+			dst[x*4+1] = src[x*ncomponents+1];
+			dst[x*4+2] = src[x*ncomponents+0];
+		}
+		dst += hdr.biWidth * 4;
+		src += image.width * ncomponents;
+	}
+
+}
+
 void display(HWND hWnd)
 {
 	if (!g_filenames.size() || g_indexToDisplay >= g_filenames.size()) {
@@ -216,25 +242,12 @@ void display(HWND hWnd)
 
 	BITMAPINFO* pBMI = (BITMAPINFO*) &g_bmiBuff[0];
 	const BITMAPINFOHEADER& hdr = pBMI->bmiHeader;
-	if (image.width > hdr.biWidth && image.height > hdr.biHeight) {
-        fprintf(stderr,
-				"Image %d x %d is bigger than internal bitmap %d x %d.\n",
-				image.width, image.height, hdr.biWidth, hdr.biHeight);
-        return;
-	}
-
-	const unsigned char* src = image.data;
-	int ncomponents = image.ncomponents;
 	unsigned char* dst = (unsigned char*) g_pBits;
-	for (int y=0; y<image.height; ++y) {
-		for (int x=0; x<image.width; ++x) {
-			dst[x*4+0] = src[x*ncomponents+2];
-			dst[x*4+1] = src[x*ncomponents+1];
-			dst[x*4+2] = src[x*ncomponents+0];
-		}
-		dst += hdr.biWidth * 4;
-		src += image.width * ncomponents;
-	}
+
+	drawImage(dst, hdr, image);
+
+
+
 
 	RECT rec;
 	::GetClientRect(hWnd, &rec);
@@ -321,6 +334,34 @@ void OnDropFiles(HWND hWnd, HDROP hDrop)
 	DragFinish(hDrop);
 }
 
+void OnLButtonDown(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags)
+{
+	SetCapture(hwnd);
+}
+
+void OnLButtonUp(HWND hwnd, int x, int y, UINT keyFlags)
+{
+	ReleaseCapture();
+}
+
+void OnMouseMove(HWND hwnd, int x, int y, UINT keyFlags)
+{
+	if (GetCapture() == hwnd) {
+		if (!g_filenames.size()) {
+			return;
+		}
+
+		RECT rect;
+		GetClientRect(hwnd, &rect);
+		int width = rect.right - rect.left;
+		double ratio = x / (double)width;
+
+		g_indexToDisplay = std::min<int>(g_filenames.size() * ratio, (int)g_filenames.size() - 1);
+		display(hwnd);
+
+	}
+}
+
 /*
  *  Window procedure
  */
@@ -336,6 +377,9 @@ WndProc(HWND hwnd, UINT uiMsg, WPARAM wParam, LPARAM lParam)
     HANDLE_MSG(hwnd, WM_CHAR, OnChar);
     HANDLE_MSG(hwnd, WM_KEYDOWN, OnKeyDown);
 	HANDLE_MSG(hwnd, WM_DROPFILES, OnDropFiles);
+	HANDLE_MSG(hwnd, WM_LBUTTONDOWN, OnLButtonDown);
+	HANDLE_MSG(hwnd, WM_LBUTTONUP, OnLButtonUp);
+	HANDLE_MSG(hwnd, WM_MOUSEMOVE, OnMouseMove);
     case WM_PRINTCLIENT: OnPrintClient(hwnd, (HDC)wParam); return 0;
 	case WM_ERASEBKGND: return TRUE;
     }
