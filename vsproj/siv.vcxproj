@@ -127,15 +127,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\ImageZero\file.cpp" />
-    <ClCompile Include="..\ImageZero\portableimage.cpp" />
+    <ClCompile Include="..\image.cpp" />
     <ClCompile Include="..\main.cpp" />
     <ClCompile Include="..\winutil.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\ImageZero\file.h" />
-    <ClInclude Include="..\ImageZero\image.h" />
-    <ClInclude Include="..\ImageZero\portableimage.h" />
+    <ClInclude Include="..\image.h" />
+    <ClInclude Include="..\stb_image.h" />
     <ClInclude Include="..\winutil.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

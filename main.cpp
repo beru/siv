@@ -22,8 +22,7 @@
 #include "WairCursor.h"
 #include "winutil.h"
 
-#include "ImageZero/portableimage.h"
-#include "ImageZero/file.h"
+#include "image.h"
 
 HINSTANCE g_hinst;                          /* This application's HINSTANCE */
 
@@ -39,8 +38,7 @@ std::vector<std::wstring> g_filenames;
 struct CacheEntry
 {
 	std::wstring filename;
-    PortableImage pi;
-    std::shared_ptr<InputFile> infile;
+    std::shared_ptr<Image> image;
 };
 std::vector<CacheEntry> g_caches;
 
@@ -169,29 +167,15 @@ HWND CreateFullscreenWindow(HWND hwnd)
 static
 bool loadImage(const TCHAR* path)
 {
-	auto& cache = g_caches[g_indexToDisplay];
-    cache.infile = std::shared_ptr<InputFile>(new InputFile(path));
-	auto& infile = *cache.infile;
-	auto& pi = cache.pi;
-    if (!infile.isReadable()) {
-        fprintf(stderr, "Cannot open input file");
-        return false;
-    }
-    if (!pi.readHeader(infile.data())) {
-        fprintf(stderr, "Cannot handle input file, only 24 bit PPM files supported.\n");
-        return false;
-    }
-    if (pi.components() != 3) {
-        fprintf(stderr, "Cannot handle 8-bit (grayscale) PGM files, only 24 bit PPM files supported.\n");
-        return false;
-    }
-    if (pi.width() > 16384 || pi.height() > 16384) {
-        fprintf(stderr, "Cannot handle image size %d x %d, limit is 16384 x 16384.\n", pi.width(), pi.height());
-        return false;
-    }
-
-	cache.filename = path;
-
+	FILE* f = _wfopen(path, _T("rb"));
+	if (f) {
+		auto& cache = g_caches[g_indexToDisplay];
+		cache.image = std::shared_ptr<Image>(new Image());
+		auto& image = *cache.image;
+		image.load(f);
+		fclose(f);
+		cache.filename = path;
+	}
     return true;
 }
 
@@ -220,7 +204,11 @@ void display(HWND hWnd)
 		}
 	}
 
-	auto& pi = cache.pi;
+	if (!cache.image) {
+		return;
+	}
+
+	auto& image = *cache.image;
 
 	TCHAR title[256];
 	_stprintf_s(title, _T("%s - (%u/%u) %s"), TEXT(APP_NAME), g_indexToDisplay + 1, g_filenames.size(), pf);
@@ -228,28 +216,30 @@ void display(HWND hWnd)
 
 	BITMAPINFO* pBMI = (BITMAPINFO*) &g_bmiBuff[0];
 	const BITMAPINFOHEADER& hdr = pBMI->bmiHeader;
-	if (pi.width() > hdr.biWidth && pi.height() > hdr.biHeight) {
+	if (image.width > hdr.biWidth && image.height > hdr.biHeight) {
         fprintf(stderr,
 				"Image %d x %d is bigger than internal bitmap %d x %d.\n",
-				pi.width(), pi.height(), hdr.biWidth, hdr.biHeight);
+				image.width, image.height, hdr.biWidth, hdr.biHeight);
         return;
 	}
 
-	const unsigned char* src = pi.data();
+	const unsigned char* src = image.data;
+	int ncomponents = image.ncomponents;
 	unsigned char* dst = (unsigned char*) g_pBits;
-	for (int y=0; y<pi.height(); ++y) {
-		for (int x=0; x<pi.width(); ++x) {
-			dst[x*4+0] = src[x*3+2];
-			dst[x*4+1] = src[x*3+1];
-			dst[x*4+2] = src[x*3+0];
+	for (int y=0; y<image.height; ++y) {
+		for (int x=0; x<image.width; ++x) {
+			dst[x*4+0] = src[x*ncomponents+2];
+			dst[x*4+1] = src[x*ncomponents+1];
+			dst[x*4+2] = src[x*ncomponents+0];
 		}
 		dst += hdr.biWidth * 4;
-		src += pi.width() * 3;
+		src += image.width * ncomponents;
 	}
 
 	RECT rec;
 	::GetClientRect(hWnd, &rec);
 	::InvalidateRect(hWnd, &rec, TRUE);
+	::UpdateWindow(hWnd);
 }
 
 void OnChar(HWND hwnd, TCHAR ch, int cRepeat)
@@ -302,7 +292,9 @@ bool findFiles(const wchar_t* dir, std::vector<std::wstring>& filenames)
 	}
 	BOOL ret;
 	do {
-		filenames.emplace_back(ffd.cFileName);
+		if (_tcscmp(ffd.cFileName, _T(".")) && _tcscmp(ffd.cFileName, _T(".."))) {
+			filenames.emplace_back(ffd.cFileName);
+		}
 		ret = FindNextFile(handle, &ffd);
 	} while (ret);
 
@@ -317,7 +309,7 @@ void OnDropFiles(HWND hWnd, HDROP hDrop)
 	if (PathIsDirectory(buff.get())) {
 		wchar_t* dir = buff.get();
 		g_dir = dir;
-		PathAppend(dir, TEXT("\\*.ppm"));
+		PathAppend(dir, TEXT("\\*.*"));
 		g_filenames.clear();
 		WaitCursor waiter;
 		if (findFiles(dir, g_filenames)) {
