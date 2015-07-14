@@ -26,6 +26,7 @@
 #include "image.h"
 #include "thread.h"
 #include "CriticalSection.h"
+#include "trace.h"
 
 HINSTANCE g_hinst;                          /* This application's HINSTANCE */
 
@@ -46,6 +47,11 @@ struct CacheEntry
 std::vector<CacheEntry> g_caches;
 
 int g_indexToDisplay = 0;
+int g_scale = 0;
+POINT g_scrollStart;
+POINT g_scrollStartMouse;
+
+POINT g_scroll;
 
 Thread g_loadThread;
 CriticalSection g_cs;
@@ -245,6 +251,22 @@ void
 PaintContent(HWND hwnd, PAINTSTRUCT *pps)
 {
 	RECT rec = pps->rcPaint;
+
+#if 1
+	::SetStretchBltMode(pps->hdc, COLORONCOLOR);
+	::StretchBlt(
+		pps->hdc,
+		rec.left,
+		rec.top,
+		rec.right - rec.left,
+		rec.bottom - rec.top,
+		g_hMemDC,
+		(rec.left + g_scroll.x),
+		(rec.top + g_scroll.y),
+		(rec.right - rec.left) >> g_scale,
+		(rec.bottom - rec.top) >> g_scale,
+		SRCCOPY);
+#else
 	::BitBlt(
 		pps->hdc,
 		rec.left,
@@ -255,7 +277,7 @@ PaintContent(HWND hwnd, PAINTSTRUCT *pps)
 		rec.left,
 		rec.top,
 		SRCCOPY);
-
+#endif
 }
 
 /*
@@ -344,6 +366,56 @@ void OnKeyDown(HWND hwnd, UINT vk, BOOL fDown, int cRepeat, UINT flags)
 		g_indexToDisplay = (int)g_filenames.size() - 1;
 		display(hwnd);
 		break;
+	case VK_OEM_PLUS:
+	case VK_ADD:
+		if (g_scale + 1 <= 8) {
+			POINT cursorPos;
+			GetCursorPos(&cursorPos);
+			ScreenToClient(hwnd, &cursorPos);
+			RECT rect;
+			GetClientRect(hwnd, &rect);
+			if (PtInRect(&rect, cursorPos)) {
+				// “™”{‰æ‘œ‚Å‚ÌˆÊ’u
+				int x = g_scroll.x + (cursorPos.x >> g_scale);
+				int y = g_scroll.y + (cursorPos.y >> g_scale);
+				// Šg‘åŒã‚É“¯‚¶•\Ž¦ˆÊ’u‚É—ˆ‚é‚æ‚¤‚É’²®
+				g_scroll.x = x - (cursorPos.x >> (g_scale + 1));
+				g_scroll.y = y - (cursorPos.y >> (g_scale + 1));
+			}
+			++g_scale;
+			display(hwnd);
+		}
+		break;
+	case VK_OEM_MINUS:
+	case VK_SUBTRACT:
+		if (g_scale - 1 >= 0) {
+			POINT cursorPos;
+			GetCursorPos(&cursorPos);
+			ScreenToClient(hwnd, &cursorPos);
+			RECT rect;
+			GetClientRect(hwnd, &rect);
+			if (PtInRect(&rect, cursorPos)) {
+				// “™”{‰æ‘œ‚Å‚ÌˆÊ’u
+				int x = g_scroll.x + (cursorPos.x >> g_scale);
+				int y = g_scroll.y + (cursorPos.y >> g_scale);
+				// k¬Œã‚É“¯‚¶•\Ž¦ˆÊ’u‚É—ˆ‚é‚æ‚¤‚É’²®
+				g_scroll.x = x - (cursorPos.x >> (g_scale - 1));
+				g_scroll.y = y - (cursorPos.y >> (g_scale - 1));
+				//x = sx + (cx >> scale);
+				//x = sx2 + (cx >> (scale - 1))
+				//sx2 = x - (cx >> (scale - 1))
+			}
+			--g_scale;
+			display(hwnd);
+		}
+		break;
+	case VK_NUMPAD0:
+		if (g_scale != 0) {
+			g_scale = 0;
+			g_scroll.x = g_scroll.y = 0;
+			display(hwnd);
+		}
+		break;
 	}
 	//TCHAR msg[32];
 	//_stprintf(msg, L"%d", g_indexToDisplay);
@@ -379,6 +451,9 @@ void OnDropFiles(HWND hWnd, HDROP hDrop)
 
 void OnLButtonDown(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags)
 {
+	g_scrollStart = g_scroll;
+	g_scrollStartMouse.x = x;
+	g_scrollStartMouse.y = y;
 	SetCapture(hwnd);
 }
 
@@ -394,13 +469,8 @@ void OnMouseMove(HWND hwnd, int x, int y, UINT keyFlags)
 			return;
 		}
 
-		RECT rect;
-		GetClientRect(hwnd, &rect);
-		int width = rect.right - rect.left;
-		double ratio = x / (double)width;
-
-		g_indexToDisplay = std::min<int>(g_filenames.size() * ratio, (int)g_filenames.size() - 1);
-		//MessageBox(0, L"aa", L"aa", 0);
+		g_scroll.x = g_scrollStart.x + ((g_scrollStartMouse.x - x) >> g_scale);
+		g_scroll.y = g_scrollStart.y + ((g_scrollStartMouse.y - y) >> g_scale);
 		display(hwnd);
 	}
 }
